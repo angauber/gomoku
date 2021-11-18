@@ -13,12 +13,14 @@ pub enum Player {
     Computer,
 }
 
+#[derive(PartialEq)]
 pub enum Cell {
     Empty,
     Human,
     Computer,
 }
 
+#[derive(Clone)]
 pub struct Goban {
     player: BitVec,
     computer: BitVec,
@@ -33,7 +35,7 @@ pub enum Axis {
 }
 
 #[derive(Debug)]
-pub struct Move {
+pub struct Position {
     pub row: usize,
     pub col: usize,
 }
@@ -141,15 +143,26 @@ impl Goban {
         }
     }
 
-    pub fn possible_moves(&self) -> Vec<Move>
-    {
-        let mut moves: Vec<Move> = Vec::new();
-        let intersection: BitVec;
+    pub fn compute_heuristic(&self, player: Player) -> usize {
+        let mut max: usize = 0;
 
-        intersection = !(self.player.clone() | self.computer.clone());
+        for axis in Axis::iter() {
+            max = std::cmp::max(max, self.maximum_line_size(player, axis));
+        }
+
+        max
+    }
+
+    pub fn get_possible_moves(&self) -> Vec<Position>
+    {
+        let mut moves: Vec<Position> = Vec::new();
+        let intersection: BitVec = !(self.player.clone() | self.computer.clone());
 
         for index in intersection.iter_ones() {
-            moves.push(Move { row: index / GOBAN_SIZE, col: index % GOBAN_SIZE });
+            // dirty fix
+            if (index / GOBAN_SIZE < GOBAN_SIZE && index % GOBAN_SIZE < GOBAN_SIZE) {
+                moves.push(Position { row: index / GOBAN_SIZE, col: index % GOBAN_SIZE });
+            }
         }
 
         moves
@@ -237,5 +250,21 @@ mod tests {
 
         assert_eq!(goban.maximum_line_size(Player::Human, Axis::DiagLeft), WIN_MINIMUM_LINE_SIZE);
         assert_eq!(goban.is_won(Player::Human), true);
+    }
+
+    #[test]
+    fn it_correctly_compute_heuristic() {
+        let mut goban: Goban = Goban::new();
+
+        for i in 0..7 {
+            goban.set(0, i, Cell::Computer);
+        }
+
+        for i in 0..4 {
+            goban.set(i, 12, Cell::Human);
+        }
+
+        assert_eq!(goban.compute_heuristic(Player::Computer), 7);
+        assert_eq!(goban.compute_heuristic(Player::Human), 4);
     }
 }
