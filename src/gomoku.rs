@@ -35,7 +35,6 @@ impl Gomoku {
         for possible_move in self.goban.get_possible_moves() {
             // println!("{:?}", possible_move);
 
-            self.goban.
             let mut initial_node = self.goban.clone();
 
             initial_node.set(possible_move.row, possible_move.col, Cell::Computer);
