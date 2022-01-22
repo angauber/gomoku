@@ -1,21 +1,16 @@
-mod goban;
-mod gomoku;
-
-use crate::gomoku::Gomoku;
-use crate::goban::{Axis, Cell, Goban, Player, Position, WIN_MINIMUM_LINE_SIZE};
 use std::io;
+use gomoku::gomoku::Gomoku;
+use gomoku::goban::{Position, Player};
 
 fn get_human_move(input: String) -> Option<Position> {
-    let tokens: Vec<&str> = input.trim().split(" ").collect();
-    let row;
-    let col;
+    let tokens: Vec<&str> = input.trim().split(' ').collect();
 
     if tokens.len() != 2 {
         return None;
     }
 
-    row = tokens[0].parse();
-    col = tokens[1].parse();
+    let row = tokens[0].parse();
+    let col = tokens[1].parse();
 
     if row.is_err() || col.is_err() {
         return None;
@@ -28,32 +23,26 @@ fn get_human_move(input: String) -> Option<Position> {
 }
 
 fn main() {
-    let mut gomoku: Gomoku = Gomoku::new();
+    let mut gomoku = Gomoku::new();
 
-    gomoku.play_computer_move();
+    loop {
+        let mut input = String::new();
 
-    return ;
+        println!("Input: row col");
+        io::stdin().read_line(&mut input).expect("Could not read from stdin");
 
-    // while true {
-    //     let mut input = String::new();
-    //
-    //     println!("Input: row col");
-    //     io::stdin().read_line(&mut input);
-    //
-    //     let human_move = get_human_move(input);
-    //
-    //     if human_move.is_none() {
-    //         println!("Invalid move");
-    //     } else {
-    //         let position = human_move.unwrap();
-    //
-    //         if gomoku.play(position, Player::Human) {
-    //             gomoku.play_computer_move();
-    //
-    //             gomoku.print_board();
-    //         } else {
-    //             println!("Forbidden move");
-    //         }
-    //     }
-    // }
+        let human_move = get_human_move(input);
+
+        if let Some(position) = human_move {
+            if gomoku.play(position, Player::Human) {
+                gomoku.play_computer_move();
+
+                gomoku.print_board();
+            } else {
+                panic!("Forbidden move");
+            }
+        } else {
+            println!("Invalid input");
+        }
+    }
 }

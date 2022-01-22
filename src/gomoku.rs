@@ -5,6 +5,12 @@ pub struct Gomoku {
     goban: Goban,
 }
 
+impl Default for Gomoku {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Gomoku {
     pub fn new() -> Gomoku {
         Gomoku {
@@ -13,7 +19,9 @@ impl Gomoku {
     }
 
     pub fn play(&mut self, position: Position, player: Player) -> bool {
-        if (position.row >= GOBAN_SIZE || position.col >= GOBAN_SIZE || self.goban.get(position.row, position.col) != Cell::Empty) {
+        if position.row >= GOBAN_SIZE ||
+            position.col >= GOBAN_SIZE ||
+            self.goban.get(position.row, position.col) != Cell::Empty {
             return false;
         }
 
@@ -30,15 +38,12 @@ impl Gomoku {
         let mut best_value: Option<i32> = None;
         let mut value: i32;
 
-        // println!("{:?}", self.goban.get_possible_moves());
-
         for possible_move in self.goban.get_possible_moves() {
-            // println!("{:?}", possible_move);
-
             let mut initial_node = self.goban.clone();
 
             initial_node.set(possible_move.row, possible_move.col, Cell::Computer);
 
+            // Human move first, minimizing
             value = self.minmax(initial_node, 1, false);
 
             if (best_move.is_none() && best_value.is_none()) || value > best_value.unwrap() {
@@ -47,16 +52,22 @@ impl Gomoku {
             }
         }
 
-        if (best_move.is_none()) {
-            println!("ALERT NO MOVE FOUND");
+        if let Some(move_to_play) = best_move {
+            self.play(move_to_play, Player::Computer);
         } else {
-            self.play(best_move.unwrap(), Player::Computer);
+            panic!("No move found");
         }
     }
 
     fn minmax(&self, node: Goban, depth: usize, maximizing: bool) -> i32 {
-        if depth == 0 || node.is_won(Player::Computer) {
-            return node.compute_heuristic(Player::Computer) as i32;
+        if node.is_won(Player::Computer) {
+            return i32::MAX;
+        }
+        if node.is_won(Player::Human) {
+            return i32::MIN;
+        }
+        if depth == 0 {
+            return node.evaluate();
         }
 
         let mut res: i32 = if maximizing { i32::MIN } else { i32::MAX };
@@ -67,12 +78,12 @@ impl Gomoku {
             next_node.set(position.row, position.col, if maximizing {Cell::Computer} else {Cell::Human});
 
             res = match maximizing {
-                true => cmp::max(res, self.minmax(node.clone(), depth - 1, !maximizing)),
-                false => cmp::min(res, self.minmax(node.clone(), depth - 1, !maximizing)),
+                true => cmp::max(res, self.minmax(next_node.clone(), depth - 1, !maximizing)),
+                false => cmp::min(res, self.minmax(next_node.clone(), depth - 1, !maximizing)),
             }
         }
 
-        return res;
+        res
     }
 
     pub fn print_board(&self) {

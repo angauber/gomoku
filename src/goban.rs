@@ -1,11 +1,14 @@
-use bitvec::prelude::*;
 use std::fmt;
+
+use bitvec::prelude::*;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 pub const GOBAN_SIZE: usize = 19;
 pub const WIN_MINIMUM_LINE_SIZE: usize = 5;
-const BIT_SIZE: usize = self::GOBAN_SIZE * self::GOBAN_SIZE + self::GOBAN_SIZE;
+const BIT_SIZE: usize = 380;
+
+type Bitboard = BitArr!(for BIT_SIZE, in Msb0, u8);
 
 #[derive(Debug, Clone, Copy)]
 pub enum Player {
@@ -22,8 +25,8 @@ pub enum Cell {
 
 #[derive(Clone)]
 pub struct Goban {
-    player: BitVec,
-    computer: BitVec,
+    player: Bitboard,
+    computer: Bitboard,
 }
 
 #[derive(EnumIter, Clone, Copy)]
@@ -40,6 +43,20 @@ pub struct Position {
     pub col: usize,
 }
 
+impl Position {
+    pub fn new(row: usize, col: usize) -> Position {
+        Position {
+            row,
+            col,
+        }
+    }
+}
+
+impl Default for Goban {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl fmt::Debug for Goban {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for row in 0..GOBAN_SIZE {
@@ -50,58 +67,58 @@ impl fmt::Debug for Goban {
                     Cell::Computer => "O",
                 })?;
             }
-            write!(f, "\n")?;
+            writeln!(f)?;
         }
 
-        write!(f, "\n")
+        writeln!(f)
     }
 }
 
 impl Goban {
     pub fn new() -> Goban {
         Goban {
-            player: bitvec![0; BIT_SIZE],
-            computer: bitvec![0; BIT_SIZE],
+            player: bitarr![Msb0, u8; 0; BIT_SIZE],
+            computer: bitarr![Msb0, u8; 0; BIT_SIZE],
         }
     }
 
-    pub fn print_bitboard(bitboard: &BitVec) {
+    pub fn print_bitboard(bitboard: &Bitboard) {
         for row in 0..GOBAN_SIZE {
             for col in 0..GOBAN_SIZE {
                 print!("{}", match bitboard[(row * (GOBAN_SIZE + 1)) + col] {
-                    false => 0,
                     true => 1,
+                    false => 0,
                 });
             }
-            print!("\n");
+            println!();
         }
 
-        print!("\n");
+        println!();
     }
 
     /**
-    https://en.wikipedia.org/wiki/Erosion_(morphology)
+     * https://en.wikipedia.org/wiki/Erosion_(morphology)
      */
-    pub fn erode(bitboard: BitVec, axis: Axis, length: usize) -> BitVec {
-        let mut rhs = bitboard.clone();
+    pub fn erode(bitboard: &mut Bitboard, axis: Axis, length: usize) {
+        let mut rhs = *bitboard;
 
         rhs.shift_right(Goban::get_shift(axis) * length);
 
-        bitboard & rhs
+        *bitboard &= rhs
     }
 
     /**
-    Eroding the player bitboard in each axis to find the maximum length\
+     * Eroding the player bitboard in each axis to find the maximum length
      */
     pub fn maximum_line_size(&self, player: Player, axis: Axis) -> usize {
-        let mut bitboard: BitVec = match player {
-            Player::Human => self.player.clone(),
-            Player::Computer => self.computer.clone(),
-        };
         let mut size: usize = 0;
+        let mut bitboard = match player {
+            Player::Human => self.player,
+            Player::Computer => self.computer,
+        };
 
         while bitboard.any() {
-            bitboard = Goban::erode(bitboard, axis, 1);
+            Goban::erode(&mut bitboard, axis, 1);
             size += 1;
         }
 
@@ -143,9 +160,14 @@ impl Goban {
         }
     }
 
+    pub fn evaluate(&self) -> i32 {
+        self.compute_heuristic(Player::Computer) as i32 - self.compute_heuristic(Player::Human) as i32
+    }
+
     pub fn compute_heuristic(&self, player: Player) -> usize {
         let mut max: usize = 0;
 
+        /* Could we erode in each axis at the same time ? */
         for axis in Axis::iter() {
             max = std::cmp::max(max, self.maximum_line_size(player, axis));
         }
@@ -155,17 +177,21 @@ impl Goban {
 
     pub fn get_possible_moves(&self) -> Vec<Position>
     {
-        let mut moves: Vec<Position> = Vec::new();
-        let intersection: BitVec = !(self.player.clone() | self.computer.clone());
+        let mut positions: Vec<Position> = Vec::new();
+        let playable = !(self.player | self.computer);
 
-        for index in intersection.iter_ones() {
-            // dirty fix
-            if (index / GOBAN_SIZE < GOBAN_SIZE && index % GOBAN_SIZE < GOBAN_SIZE) {
-                moves.push(Position { row: index / GOBAN_SIZE, col: index % GOBAN_SIZE });
+        for index in playable.iter_ones() {
+            let row = index / (GOBAN_SIZE + 1);
+            let col = index - (row * (GOBAN_SIZE + 1));
+
+            if col == GOBAN_SIZE || index >= BIT_SIZE {
+                continue;
             }
+
+            positions.push(Position::new(row, col));
         }
 
-        moves
+        positions
     }
 
     fn get_shift(axis: Axis) -> usize {
@@ -178,15 +204,12 @@ impl Goban {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use bitvec::prelude::*;
-
     use crate::goban::{Axis, Cell, Goban, GOBAN_SIZE, Player, WIN_MINIMUM_LINE_SIZE};
 
     #[test]
-    fn it_correctly_detects_row_win() {
+    fn it_correctly_detects_win() {
         let mut goban: Goban = Goban::new();
 
         for i in 0..WIN_MINIMUM_LINE_SIZE {
@@ -204,9 +227,19 @@ mod tests {
 
         goban.set(18, 10, Cell::Computer);
 
-        println!("{:?}", goban);
 
         assert_eq!(goban.maximum_line_size(Player::Human, Axis::Row), 10);
+        assert_eq!(goban.is_won(Player::Human), true);
+
+        goban = Goban::new();
+
+        goban.set(3, 3, Cell::Human);
+        goban.set(4, 4, Cell::Human);
+        goban.set(5, 5, Cell::Human);
+        goban.set(6, 6, Cell::Human);
+        goban.set(7, 7, Cell::Human);
+
+        assert_eq!(goban.maximum_line_size(Player::Human, Axis::DiagRight), 5);
         assert_eq!(goban.is_won(Player::Human), true);
     }
 
