@@ -35,7 +35,7 @@ fn main() {
 
         if let Some(position) = human_move {
             if gomoku.play(position, Player::Human) {
-                gomoku.play_computer_move();
+                gomoku.play_computer_move(2);
 
                 gomoku.print_board();
             } else {

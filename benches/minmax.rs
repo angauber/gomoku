@@ -18,6 +18,6 @@ mod tests {
         gomoku.play(Position { row: 5, col: 5}, Player::Human);
         gomoku.play(Position { row: 7, col: 7}, Player::Human);
 
-        bencher.iter(|| gomoku.play_computer_move());
+        bencher.iter(|| gomoku.play_computer_move(2));
     }
 }

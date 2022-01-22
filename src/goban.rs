@@ -1,4 +1,6 @@
 use std::fmt;
+use std::cmp::{PartialEq,Eq};
+use std::hash::Hash;
 
 use bitvec::prelude::*;
 use strum::IntoEnumIterator;
@@ -37,7 +39,7 @@ pub enum Axis {
     DiagRight,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Position {
     pub row: usize,
     pub col: usize,

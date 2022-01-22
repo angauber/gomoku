@@ -1,5 +1,8 @@
 use crate::goban::{Cell, Goban, GOBAN_SIZE, Player, Position};
 use std::cmp;
+use std::collections::HashMap;
+use std::thread;
+use std::sync::{Arc, Mutex};
 
 pub struct Gomoku {
     goban: Goban,
@@ -33,33 +36,51 @@ impl Gomoku {
         true
     }
 
-    pub fn play_computer_move(&mut self) {
-        let mut best_move: Option<Position> = None;
-        let mut best_value: Option<i32> = None;
-        let mut value: i32;
+    pub fn play_computer_move(&mut self, depth: usize) {
+        let moves = Arc::new(Mutex::new(HashMap::new()));
+        let mut handles = vec![];
 
         for possible_move in self.goban.get_possible_moves() {
+            let moves = Arc::clone(&moves);
             let mut initial_node = self.goban.clone();
 
-            initial_node.set(possible_move.row, possible_move.col, Cell::Computer);
+            let handle = thread::spawn(move || {
+                initial_node.set(possible_move.row, possible_move.col, Cell::Computer);
 
-            // Human move first, minimizing
-            value = self.minmax(initial_node, 1, false);
+                let value = Self::minmax(
+                    initial_node,
+                    match depth > 0 {
+                        true => depth - 1,
+                        false => depth,
+                    },
+                    false);
 
-            if (best_move.is_none() && best_value.is_none()) || value > best_value.unwrap() {
-                best_move = Some(possible_move);
-                best_value = Some(value);
-            }
+                moves.lock().unwrap().insert(possible_move, value);
+            });
+
+            handles.push(handle);
         }
 
-        if let Some(move_to_play) = best_move {
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let moves = Arc::try_unwrap(moves).unwrap().into_inner().unwrap();
+
+        if let Some(move_to_play) = Self::get_best_move(moves) {
             self.play(move_to_play, Player::Computer);
         } else {
             panic!("No move found");
         }
     }
 
-    fn minmax(&self, node: Goban, depth: usize, maximizing: bool) -> i32 {
+    fn get_best_move(moves: HashMap<Position, i32>) -> Option<Position> {
+        moves.into_iter()
+            .max_by(|a, b| a.1.cmp(&b.1))
+            .map(|(k, _v)| k)
+    }
+
+    fn minmax(node: Goban, depth: usize, maximizing: bool) -> i32 {
         if node.is_won(Player::Computer) {
             return i32::MAX;
         }
@@ -78,8 +99,8 @@ impl Gomoku {
             next_node.set(position.row, position.col, if maximizing {Cell::Computer} else {Cell::Human});
 
             res = match maximizing {
-                true => cmp::max(res, self.minmax(next_node.clone(), depth - 1, !maximizing)),
-                false => cmp::min(res, self.minmax(next_node.clone(), depth - 1, !maximizing)),
+                true => cmp::max(res, Self::minmax(next_node.clone(), depth - 1, !maximizing)),
+                false => cmp::min(res, Self::minmax(next_node.clone(), depth - 1, !maximizing)),
             }
         }
 
