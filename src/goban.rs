@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, isize};
 use std::cmp::{PartialEq,Eq};
 use std::hash::Hash;
 
@@ -162,8 +162,8 @@ impl Goban {
         }
     }
 
-    pub fn evaluate(&self) -> i32 {
-        self.compute_heuristic(Player::Computer) as i32 - self.compute_heuristic(Player::Human) as i32
+    pub fn evaluate(&self) -> isize {
+        self.compute_heuristic(Player::Computer) as isize - self.compute_heuristic(Player::Human) as isize
     }
 
     pub fn compute_heuristic(&self, player: Player) -> usize {
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn it_correctly_detects_win() {
-        let mut goban: Goban = Goban::new();
+        let mut goban = Goban::new();
 
         for i in 0..WIN_MINIMUM_LINE_SIZE {
             goban.set(0, i, Cell::Computer);

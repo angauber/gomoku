@@ -1,8 +1,9 @@
-use crate::goban::{Cell, Goban, GOBAN_SIZE, Player, Position};
-use std::cmp;
+use std::{cmp, isize};
 use std::collections::HashMap;
-use std::thread;
 use std::sync::{Arc, Mutex};
+use std::thread;
+
+use crate::goban::{Cell, Goban, GOBAN_SIZE, Player, Position};
 
 pub struct Gomoku {
     goban: Goban,
@@ -10,17 +11,13 @@ pub struct Gomoku {
 
 impl Default for Gomoku {
     fn default() -> Self {
-        Self::new()
+        Self {
+            goban: Goban::new(),
+        }
     }
 }
 
 impl Gomoku {
-    pub fn new() -> Gomoku {
-        Gomoku {
-            goban: Goban::new(),
-        }
-    }
-
     pub fn play(&mut self, position: Position, player: Player) -> bool {
         if position.row >= GOBAN_SIZE ||
             position.col >= GOBAN_SIZE ||
@@ -47,15 +44,17 @@ impl Gomoku {
             let handle = thread::spawn(move || {
                 initial_node.set(possible_move.row, possible_move.col, Cell::Computer);
 
-                let value = Self::minmax(
-                    initial_node,
+                let eval = Self::minimax(
+                    &initial_node,
                     match depth > 0 {
                         true => depth - 1,
                         false => depth,
                     },
+                    isize::MIN,
+                    isize::MAX,
                     false);
 
-                moves.lock().unwrap().insert(possible_move, value);
+                moves.lock().unwrap().insert(possible_move, eval);
             });
 
             handles.push(handle);
@@ -74,37 +73,73 @@ impl Gomoku {
         }
     }
 
-    fn get_best_move(moves: HashMap<Position, i32>) -> Option<Position> {
+    fn get_best_move(moves: HashMap<Position, isize>) -> Option<Position> {
         moves.into_iter()
             .max_by(|a, b| a.1.cmp(&b.1))
             .map(|(k, _v)| k)
     }
 
-    fn minmax(node: Goban, depth: usize, maximizing: bool) -> i32 {
+    fn get_child_nodes(node: &Goban, player: Player) -> Vec<Goban>
+    {
+        let mut child_nodes = Vec::new();
+
+        for position in node.get_possible_moves() {
+            let mut child = node.clone();
+
+            child.set(position.row, position.col, match player {
+                Player::Computer => Cell::Computer,
+                Player::Human => Cell::Human
+            });
+
+            child_nodes.push(child);
+        }
+
+        child_nodes
+    }
+
+    fn minimax(node: &Goban, depth: usize, mut alpha: isize, mut beta: isize, maximizing: bool) -> isize {
         if node.is_won(Player::Computer) {
-            return i32::MAX;
+            return isize::MAX;
         }
         if node.is_won(Player::Human) {
-            return i32::MIN;
+            return isize::MIN;
         }
         if depth == 0 {
             return node.evaluate();
         }
 
-        let mut res: i32 = if maximizing { i32::MIN } else { i32::MAX };
+        let mut result = match maximizing {
+            true => isize::MIN,
+            false => isize::MAX,
+        };
 
-        for position in node.get_possible_moves() {
-            let mut next_node = node.clone();
+        for child in Self::get_child_nodes(node, match maximizing {
+            true => Player::Computer,
+            false => Player::Human
+        }) {
+            let eval = Self::minimax(&child, depth - 1, alpha, beta, !maximizing);
 
-            next_node.set(position.row, position.col, if maximizing {Cell::Computer} else {Cell::Human});
+            result = match maximizing {
+                true => cmp::max(result, eval),
+                false => cmp::min(result, eval),
+            };
 
-            res = match maximizing {
-                true => cmp::max(res, Self::minmax(next_node.clone(), depth - 1, !maximizing)),
-                false => cmp::min(res, Self::minmax(next_node.clone(), depth - 1, !maximizing)),
+            let pruning = match maximizing {
+                true => result >= beta,
+                false => alpha >= result,
+            };
+
+            if pruning {
+                return result;
             }
+
+            match maximizing {
+                true => alpha = cmp::max(alpha, result),
+                false => beta = cmp::min(beta, result),
+            };
         }
 
-        res
+        result
     }
 
     pub fn print_board(&self) {

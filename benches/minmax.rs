@@ -11,7 +11,7 @@ mod tests {
 
     #[bench]
     fn minmax(bencher: &mut Bencher) {
-        let mut gomoku: Gomoku = Gomoku::new();
+        let mut gomoku: Gomoku = Gomoku::default();
 
         gomoku.play(Position { row: 3, col: 3}, Player::Human);
         gomoku.play(Position { row: 4, col: 4}, Player::Human);

@@ -23,7 +23,7 @@ fn get_human_move(input: String) -> Option<Position> {
 }
 
 fn main() {
-    let mut gomoku = Gomoku::new();
+    let mut gomoku = Gomoku::default();
 
     loop {
         let mut input = String::new();
@@ -35,7 +35,7 @@ fn main() {
 
         if let Some(position) = human_move {
             if gomoku.play(position, Player::Human) {
-                gomoku.play_computer_move(2);
+                gomoku.play_computer_move(3);
 
                 gomoku.print_board();
             } else {
