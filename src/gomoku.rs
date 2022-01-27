@@ -3,7 +3,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::goban::{Cell, Goban, GOBAN_SIZE, Player, Position};
+use crate::goban::{Cell, Eval, Goban, GOBAN_SIZE, Player, Position};
+
+pub enum GameState {
+    InProgress,
+    Won(Player),
+}
 
 pub struct Gomoku {
     goban: Goban,
@@ -18,11 +23,15 @@ impl Default for Gomoku {
 }
 
 impl Gomoku {
-    pub fn play(&mut self, position: Position, player: Player) -> bool {
+    pub fn print_board(&self) {
+        println!("{:?}", self.goban);
+    }
+
+    pub fn play(&mut self, position: Position, player: Player) -> Result<GameState, &str> {
         if position.row >= GOBAN_SIZE ||
             position.col >= GOBAN_SIZE ||
             self.goban.get(position.row, position.col) != Cell::Empty {
-            return false;
+            return Err("Invalid move");
         }
 
         self.goban.set(position.row, position.col, match player {
@@ -30,10 +39,14 @@ impl Gomoku {
             Player::Computer => Cell::Computer,
         });
 
-        true
+        Ok(self.game_state())
     }
 
-    pub fn play_computer_move(&mut self, depth: usize) {
+    pub fn play_computer_move(&mut self, depth: usize) -> GameState {
+        if depth < 2 {
+            panic!("depth search cannot be less than 2")
+        }
+
         let moves = Arc::new(Mutex::new(HashMap::new()));
         let mut handles = vec![];
 
@@ -46,13 +59,11 @@ impl Gomoku {
 
                 let eval = Self::minimax(
                     &initial_node,
-                    match depth > 0 {
-                        true => depth - 1,
-                        false => depth,
-                    },
+                    depth - 2,
                     isize::MIN,
                     isize::MAX,
-                    false);
+                    false
+                );
 
                 moves.lock().unwrap().insert(possible_move, eval);
             });
@@ -67,7 +78,10 @@ impl Gomoku {
         let moves = Arc::try_unwrap(moves).unwrap().into_inner().unwrap();
 
         if let Some(move_to_play) = Self::get_best_move(moves) {
-            self.play(move_to_play, Player::Computer);
+            match self.play(move_to_play, Player::Computer) {
+                Ok(state) => state,
+                Err(_) => panic!("Invalid move found"),
+            }
         } else {
             panic!("No move found");
         }
@@ -84,6 +98,8 @@ impl Gomoku {
         let mut child_nodes = Vec::new();
 
         for position in node.get_possible_moves() {
+            // skip this iteration if position closest non empty cell is greater than 2
+            // might we use erosion of some sort ?
             let mut child = node.clone();
 
             child.set(position.row, position.col, match player {
@@ -98,14 +114,11 @@ impl Gomoku {
     }
 
     fn minimax(node: &Goban, depth: usize, mut alpha: isize, mut beta: isize, maximizing: bool) -> isize {
-        if node.is_won(Player::Computer) {
-            return isize::MAX;
-        }
-        if node.is_won(Player::Human) {
-            return isize::MIN;
-        }
-        if depth == 0 {
-            return node.evaluate();
+        match node.evaluate() {
+            Eval::Won => return isize::MAX,
+            Eval::Lost => return isize::MIN,
+            Eval::Score(n) if depth == 0 => return n,
+            _ => (),
         }
 
         let mut result = match maximizing {
@@ -142,7 +155,15 @@ impl Gomoku {
         result
     }
 
-    pub fn print_board(&self) {
-        println!("{:?}", self.goban);
+    fn game_state(&self) -> GameState {
+        if self.goban.is_won(Player::Computer) {
+            return GameState::Won(Player::Computer);
+        }
+
+        if self.goban.is_won(Player::Human) {
+            return GameState::Won(Player::Human);
+        }
+
+        GameState::InProgress
     }
 }

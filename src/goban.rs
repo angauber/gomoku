@@ -1,5 +1,5 @@
 use std::{fmt, isize};
-use std::cmp::{PartialEq,Eq};
+use std::cmp::{PartialEq, Eq};
 use std::hash::Hash;
 
 use bitvec::prelude::*;
@@ -45,6 +45,12 @@ pub struct Position {
     pub col: usize,
 }
 
+pub enum Eval {
+    Won,
+    Lost,
+    Score(isize),
+}
+
 impl Position {
     pub fn new(row: usize, col: usize) -> Position {
         Position {
@@ -59,12 +65,13 @@ impl Default for Goban {
         Self::new()
     }
 }
+
 impl fmt::Debug for Goban {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for row in 0..GOBAN_SIZE {
             for col in 0..GOBAN_SIZE {
                 write!(f, "{}", match self.get(row, col) {
-                    Cell::Empty => "_",
+                    Cell::Empty => ".",
                     Cell::Human => "X",
                     Cell::Computer => "O",
                 })?;
@@ -112,7 +119,7 @@ impl Goban {
     /**
      * Eroding the player bitboard in each axis to find the maximum length
      */
-    pub fn maximum_line_size(&self, player: Player, axis: Axis) -> usize {
+    pub fn axis_maximum_line_size(&self, player: Player, axis: Axis) -> usize {
         let mut size: usize = 0;
         let mut bitboard = match player {
             Player::Human => self.player,
@@ -129,7 +136,7 @@ impl Goban {
 
     pub fn is_won(&self, player: Player) -> bool {
         for axis in Axis::iter() {
-            if self.maximum_line_size(player, axis) >= WIN_MINIMUM_LINE_SIZE {
+            if self.axis_maximum_line_size(player, axis) >= WIN_MINIMUM_LINE_SIZE {
                 return true;
             }
         }
@@ -162,19 +169,19 @@ impl Goban {
         }
     }
 
-    pub fn evaluate(&self) -> isize {
-        self.compute_heuristic(Player::Computer) as isize - self.compute_heuristic(Player::Human) as isize
-    }
+    pub fn evaluate(&self) -> Eval {
+        let computer_max_line_size = self.maximum_line_size(Player::Computer);
+        let human_max_line_size = self.maximum_line_size(Player::Human);
 
-    pub fn compute_heuristic(&self, player: Player) -> usize {
-        let mut max: usize = 0;
-
-        /* Could we erode in each axis at the same time ? */
-        for axis in Axis::iter() {
-            max = std::cmp::max(max, self.maximum_line_size(player, axis));
+        if human_max_line_size >= WIN_MINIMUM_LINE_SIZE {
+            return Eval::Lost
         }
 
-        max
+        if computer_max_line_size >= WIN_MINIMUM_LINE_SIZE {
+            return Eval::Won;
+        }
+
+        Eval::Score(self.compute_score(computer_max_line_size, human_max_line_size))
     }
 
     pub fn get_possible_moves(&self) -> Vec<Position>
@@ -194,6 +201,21 @@ impl Goban {
         }
 
         positions
+    }
+
+    fn compute_score(&self, computer_line_size: usize, human_line_size: usize) -> isize {
+        computer_line_size.pow(2) as isize - human_line_size.pow(2) as isize
+    }
+
+    fn maximum_line_size(&self, player: Player) -> usize {
+        let mut max: usize = 0;
+
+        /* Could we erode in each axis at the same time ? */
+        for axis in Axis::iter() {
+            max = std::cmp::max(max, self.axis_maximum_line_size(player, axis));
+        }
+
+        max
     }
 
     fn get_shift(axis: Axis) -> usize {
@@ -218,7 +240,7 @@ mod tests {
             goban.set(0, i, Cell::Computer);
         }
 
-        assert_eq!(goban.maximum_line_size(Player::Computer, Axis::Row), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Axis::Row), WIN_MINIMUM_LINE_SIZE);
         assert_eq!(goban.is_won(Player::Computer), true);
 
         goban = Goban::new();
@@ -230,7 +252,7 @@ mod tests {
         goban.set(18, 10, Cell::Computer);
 
 
-        assert_eq!(goban.maximum_line_size(Player::Human, Axis::Row), 10);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Axis::Row), 10);
         assert_eq!(goban.is_won(Player::Human), true);
 
         goban = Goban::new();
@@ -241,7 +263,7 @@ mod tests {
         goban.set(6, 6, Cell::Human);
         goban.set(7, 7, Cell::Human);
 
-        assert_eq!(goban.maximum_line_size(Player::Human, Axis::DiagRight), 5);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Axis::DiagRight), 5);
         assert_eq!(goban.is_won(Player::Human), true);
     }
 
@@ -253,7 +275,7 @@ mod tests {
             goban.set(i, 0, Cell::Computer);
         }
 
-        assert_eq!(goban.maximum_line_size(Player::Computer, Axis::Col), WIN_MINIMUM_LINE_SIZE - 1);
+        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Axis::Col), WIN_MINIMUM_LINE_SIZE - 1);
         assert_eq!(goban.is_won(Player::Computer), false);
 
         goban = Goban::new();
@@ -262,7 +284,7 @@ mod tests {
             goban.set(18 - i, 3, Cell::Human);
         }
 
-        assert_eq!(goban.maximum_line_size(Player::Human, Axis::Col), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Axis::Col), WIN_MINIMUM_LINE_SIZE);
         assert_eq!(goban.is_won(Player::Human), true);
     }
 
@@ -274,7 +296,7 @@ mod tests {
             goban.set(i, i, Cell::Computer);
         }
 
-        assert_eq!(goban.maximum_line_size(Player::Computer, Axis::DiagRight), WIN_MINIMUM_LINE_SIZE + 1);
+        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Axis::DiagRight), WIN_MINIMUM_LINE_SIZE + 1);
         assert_eq!(goban.is_won(Player::Computer), true);
 
         goban = Goban::new();
@@ -283,23 +305,7 @@ mod tests {
             goban.set(i, 18 - i, Cell::Human);
         }
 
-        assert_eq!(goban.maximum_line_size(Player::Human, Axis::DiagLeft), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Axis::DiagLeft), WIN_MINIMUM_LINE_SIZE);
         assert_eq!(goban.is_won(Player::Human), true);
-    }
-
-    #[test]
-    fn it_correctly_compute_heuristic() {
-        let mut goban: Goban = Goban::new();
-
-        for i in 0..7 {
-            goban.set(0, i, Cell::Computer);
-        }
-
-        for i in 0..4 {
-            goban.set(i, 12, Cell::Human);
-        }
-
-        assert_eq!(goban.compute_heuristic(Player::Computer), 7);
-        assert_eq!(goban.compute_heuristic(Player::Human), 4);
     }
 }
