@@ -71,15 +71,15 @@ impl fmt::Debug for Goban {
         for row in 0..GOBAN_SIZE {
             for col in 0..GOBAN_SIZE {
                 write!(f, "{}", match self.get(row, col) {
-                    Cell::Empty => ".",
-                    Cell::Human => "X",
-                    Cell::Computer => "O",
+                    Cell::Empty => ". ",
+                    Cell::Human => "X ",
+                    Cell::Computer => "O ",
                 })?;
             }
-            writeln!(f)?;
+            writeln!(f, "{}", row)?;
         }
 
-        writeln!(f)
+        writeln!(f, "0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8")
     }
 }
 

@@ -98,8 +98,8 @@ impl Gomoku {
         let mut child_nodes = Vec::new();
 
         for position in node.get_possible_moves() {
-            // skip this iteration if position closest non empty cell is greater than 2
-            // might we use erosion of some sort ?
+            // skip this iteration if position closest non empty cell is greater than n
+            // might we use dilation of some sort ?
             let mut child = node.clone();
 
             child.set(position.row, position.col, match player {
