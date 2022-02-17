@@ -1,5 +1,5 @@
 use std::{fmt, isize};
-use std::cmp::{PartialEq, Eq};
+use std::cmp::{PartialEq, Eq, max};
 use std::hash::Hash;
 
 use bitvec::prelude::*;
@@ -25,18 +25,22 @@ pub enum Cell {
     Computer,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Goban {
-    player: Bitboard,
+    human: Bitboard,
     computer: Bitboard,
 }
 
-#[derive(EnumIter, Clone, Copy)]
-pub enum Axis {
-    Row,
-    Col,
-    DiagLeft,
-    DiagRight,
+#[derive(EnumIter, Copy, Clone, Debug)]
+pub enum Direction {
+    North = -((GOBAN_SIZE + 1) as isize),
+    NorthEast = -((GOBAN_SIZE + 1) as isize) + 1,
+    East = 1,
+    SouthEast = (GOBAN_SIZE + 2) as isize,
+    South = (GOBAN_SIZE + 1) as isize,
+    SouthWest = GOBAN_SIZE as isize,
+    West = -1,
+    NorthWest = -((GOBAN_SIZE + 1) as isize) - 1,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -86,56 +90,13 @@ impl fmt::Debug for Goban {
 impl Goban {
     pub fn new() -> Goban {
         Goban {
-            player: bitarr![Msb0, u8; 0; BIT_SIZE],
+            human: bitarr![Msb0, u8; 0; BIT_SIZE],
             computer: bitarr![Msb0, u8; 0; BIT_SIZE],
         }
     }
 
-    pub fn print_bitboard(bitboard: &Bitboard) {
-        for row in 0..GOBAN_SIZE {
-            for col in 0..GOBAN_SIZE {
-                print!("{}", match bitboard[(row * (GOBAN_SIZE + 1)) + col] {
-                    true => 1,
-                    false => 0,
-                });
-            }
-            println!();
-        }
-
-        println!();
-    }
-
-    /**
-     * https://en.wikipedia.org/wiki/Erosion_(morphology)
-     */
-    pub fn erode(bitboard: &mut Bitboard, axis: Axis, length: usize) {
-        let mut rhs = *bitboard;
-
-        rhs.shift_right(Goban::get_shift(axis) * length);
-
-        *bitboard &= rhs
-    }
-
-    /**
-     * Eroding the player bitboard in each axis to find the maximum length
-     */
-    pub fn axis_maximum_line_size(&self, player: Player, axis: Axis) -> usize {
-        let mut size: usize = 0;
-        let mut bitboard = match player {
-            Player::Human => self.player,
-            Player::Computer => self.computer,
-        };
-
-        while bitboard.any() {
-            Goban::erode(&mut bitboard, axis, 1);
-            size += 1;
-        }
-
-        size
-    }
-
     pub fn is_won(&self, player: Player) -> bool {
-        for axis in Axis::iter() {
+        for axis in [Direction::East, Direction::South, Direction::SouthWest, Direction::SouthEast] {
             if self.axis_maximum_line_size(player, axis) >= WIN_MINIMUM_LINE_SIZE {
                 return true;
             }
@@ -147,12 +108,12 @@ impl Goban {
     pub fn set(&mut self, row: usize, col: usize, cell: Cell) {
         let index: usize = (row * (GOBAN_SIZE + 1)) + col;
 
-        self.player.set(index, false);
+        self.human.set(index, false);
         self.computer.set(index, false);
 
         match cell {
             Cell::Empty => (),
-            Cell::Human => self.player.set(index, true),
+            Cell::Human => self.human.set(index, true),
             Cell::Computer => self.computer.set(index, true),
         }
     }
@@ -160,7 +121,7 @@ impl Goban {
     pub fn get(&self, row: usize, col: usize) -> Cell {
         let index: usize = (row * (GOBAN_SIZE + 1)) + col;
 
-        match self.player[index] {
+        match self.human[index] {
             true => Cell::Human,
             false => match self.computer[index] {
                 true => Cell::Computer,
@@ -170,11 +131,11 @@ impl Goban {
     }
 
     pub fn evaluate(&self) -> Eval {
-        let computer_max_line_size = self.maximum_line_size(Player::Computer);
         let human_max_line_size = self.maximum_line_size(Player::Human);
+        let computer_max_line_size = self.maximum_line_size(Player::Computer);
 
         if human_max_line_size >= WIN_MINIMUM_LINE_SIZE {
-            return Eval::Lost
+            return Eval::Lost;
         }
 
         if computer_max_line_size >= WIN_MINIMUM_LINE_SIZE {
@@ -187,7 +148,7 @@ impl Goban {
     pub fn get_possible_moves(&self) -> Vec<Position>
     {
         let mut positions: Vec<Position> = Vec::new();
-        let playable = !(self.player | self.computer);
+        let playable = !(self.human | self.computer);
 
         for index in playable.iter_ones() {
             let row = index / (GOBAN_SIZE + 1);
@@ -203,34 +164,111 @@ impl Goban {
         positions
     }
 
+    pub fn get_limited_moves(&self, steps: usize) -> Vec<Position>
+    {
+        let mut positions: Vec<Position> = Vec::new();
+        let mut played_set = self.human | self.computer;
+        let playable_set = !played_set;
+        let mut limited_set = played_set;
+
+        for _ in 0..steps {
+            for axis in Direction::iter() {
+                limited_set |= Self::dilate(&played_set, axis);
+            }
+            played_set = limited_set;
+        }
+
+        limited_set &= playable_set;
+
+        for index in limited_set.iter_ones() {
+            let row = index / (GOBAN_SIZE + 1);
+            let col = index - (row * (GOBAN_SIZE + 1));
+
+            if col == GOBAN_SIZE || index >= BIT_SIZE {
+                continue;
+            }
+
+            positions.push(Position::new(row, col));
+        }
+
+        positions
+    }
+
+    fn print_bitboard(bitboard: &Bitboard) {
+        for row in 0..GOBAN_SIZE {
+            for col in 0..GOBAN_SIZE {
+                print!("{} ", match bitboard[(row * (GOBAN_SIZE + 1)) + col] {
+                    true => 1,
+                    false => 0,
+                });
+            }
+            println!();
+        }
+
+        println!();
+    }
+
+    fn dilate(bitboard: &Bitboard, axis: Direction) -> Bitboard {
+        let mut rhs = *bitboard;
+
+        match axis as isize {
+            n if n > 0 => rhs.shift_right(n as usize),
+            n if n < 0 => rhs.shift_left(-n as usize),
+            _ => {}
+        }
+
+        *bitboard | rhs
+    }
+
+    fn erode(bitboard: &mut Bitboard, axis: Direction) {
+        let mut rhs = *bitboard;
+
+        match axis as isize {
+            n if n > 0 => rhs.shift_right(n as usize),
+            n if n < 0 => rhs.shift_left(-n as usize),
+            _ => {}
+        }
+
+        *bitboard &= rhs
+    }
+
+    /**
+     * Eroding the player bitboard in each axis to find the maximum length
+     */
+    fn axis_maximum_line_size(&self, player: Player, axis: Direction) -> usize {
+        let mut size: usize = 0;
+        let mut bitboard = match player {
+            Player::Human => self.human,
+            Player::Computer => self.computer,
+        };
+
+        while bitboard.any() {
+            Goban::erode(&mut bitboard, axis);
+            size += 1;
+        }
+
+        size
+    }
+
     fn compute_score(&self, computer_line_size: usize, human_line_size: usize) -> isize {
         computer_line_size.pow(2) as isize - human_line_size.pow(2) as isize
     }
 
     fn maximum_line_size(&self, player: Player) -> usize {
-        let mut max: usize = 0;
+        let mut result: usize = 0;
 
         /* Could we erode in each axis at the same time ? */
-        for axis in Axis::iter() {
-            max = std::cmp::max(max, self.axis_maximum_line_size(player, axis));
+        for axis in [Direction::East, Direction::South, Direction::SouthWest, Direction::SouthEast] {
+            result = max(result, self.axis_maximum_line_size(player, axis));
         }
 
-        max
-    }
-
-    fn get_shift(axis: Axis) -> usize {
-        match axis {
-            Axis::Row => 1,
-            Axis::Col => GOBAN_SIZE + 1,
-            Axis::DiagLeft => GOBAN_SIZE,
-            Axis::DiagRight => GOBAN_SIZE + 2,
-        }
+        result
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::goban::{Axis, Cell, Goban, GOBAN_SIZE, Player, WIN_MINIMUM_LINE_SIZE};
+    use crate::goban::{Direction, Cell, Goban, GOBAN_SIZE, Player, WIN_MINIMUM_LINE_SIZE};
 
     #[test]
     fn it_correctly_detects_win() {
@@ -240,7 +278,9 @@ mod tests {
             goban.set(0, i, Cell::Computer);
         }
 
-        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Axis::Row), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.maximum_line_size(Player::Computer), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Direction::East), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Direction::West), WIN_MINIMUM_LINE_SIZE);
         assert_eq!(goban.is_won(Player::Computer), true);
 
         goban = Goban::new();
@@ -251,20 +291,21 @@ mod tests {
 
         goban.set(18, 10, Cell::Computer);
 
-
-        assert_eq!(goban.axis_maximum_line_size(Player::Human, Axis::Row), 10);
+        assert_eq!(goban.maximum_line_size(Player::Human), 10);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Direction::East), 10);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Direction::West), 10);
         assert_eq!(goban.is_won(Player::Human), true);
 
         goban = Goban::new();
 
-        goban.set(3, 3, Cell::Human);
-        goban.set(4, 4, Cell::Human);
+        goban.set(4, 4, Cell::Computer);
         goban.set(5, 5, Cell::Human);
         goban.set(6, 6, Cell::Human);
         goban.set(7, 7, Cell::Human);
 
-        assert_eq!(goban.axis_maximum_line_size(Player::Human, Axis::DiagRight), 5);
-        assert_eq!(goban.is_won(Player::Human), true);
+        assert_eq!(goban.maximum_line_size(Player::Human), 3);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Direction::SouthEast), 3);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Direction::NorthWest), 3);
     }
 
     #[test]
@@ -275,7 +316,9 @@ mod tests {
             goban.set(i, 0, Cell::Computer);
         }
 
-        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Axis::Col), WIN_MINIMUM_LINE_SIZE - 1);
+        assert_eq!(goban.maximum_line_size(Player::Computer), WIN_MINIMUM_LINE_SIZE - 1);
+        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Direction::South), WIN_MINIMUM_LINE_SIZE - 1);
+        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Direction::North), WIN_MINIMUM_LINE_SIZE - 1);
         assert_eq!(goban.is_won(Player::Computer), false);
 
         goban = Goban::new();
@@ -284,7 +327,9 @@ mod tests {
             goban.set(18 - i, 3, Cell::Human);
         }
 
-        assert_eq!(goban.axis_maximum_line_size(Player::Human, Axis::Col), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.maximum_line_size(Player::Human), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Direction::South), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Direction::North), WIN_MINIMUM_LINE_SIZE);
         assert_eq!(goban.is_won(Player::Human), true);
     }
 
@@ -296,7 +341,9 @@ mod tests {
             goban.set(i, i, Cell::Computer);
         }
 
-        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Axis::DiagRight), WIN_MINIMUM_LINE_SIZE + 1);
+        assert_eq!(goban.maximum_line_size(Player::Computer), WIN_MINIMUM_LINE_SIZE + 1);
+        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Direction::NorthWest), WIN_MINIMUM_LINE_SIZE + 1);
+        assert_eq!(goban.axis_maximum_line_size(Player::Computer, Direction::SouthEast), WIN_MINIMUM_LINE_SIZE + 1);
         assert_eq!(goban.is_won(Player::Computer), true);
 
         goban = Goban::new();
@@ -305,7 +352,9 @@ mod tests {
             goban.set(i, 18 - i, Cell::Human);
         }
 
-        assert_eq!(goban.axis_maximum_line_size(Player::Human, Axis::DiagLeft), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.maximum_line_size(Player::Human), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Direction::SouthWest), WIN_MINIMUM_LINE_SIZE);
+        assert_eq!(goban.axis_maximum_line_size(Player::Human, Direction::NorthEast), WIN_MINIMUM_LINE_SIZE);
         assert_eq!(goban.is_won(Player::Human), true);
     }
 }

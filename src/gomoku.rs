@@ -1,9 +1,12 @@
-use std::{cmp, isize};
-use std::collections::HashMap;
+use std::{isize};
+use std::cmp::{max, min, Ordering};
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::goban::{Cell, Eval, Goban, GOBAN_SIZE, Player, Position};
+
+const BRANCHING_FACTOR_THRESHOLD: usize = 15;
 
 pub enum GameState {
     InProgress,
@@ -12,6 +15,33 @@ pub enum GameState {
 
 pub struct Gomoku {
     goban: Goban,
+}
+
+#[derive(Eq, PartialEq)]
+pub struct NodeScore {
+    node: Goban,
+    score: isize,
+}
+
+impl Ord for NodeScore {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.score.cmp(&other.score)
+    }
+}
+
+impl PartialOrd for NodeScore {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl NodeScore {
+    pub fn new(node: Goban, score: isize) -> Self {
+        Self {
+            node,
+            score,
+        }
+    }
 }
 
 impl Default for Gomoku {
@@ -50,22 +80,22 @@ impl Gomoku {
         let moves = Arc::new(Mutex::new(HashMap::new()));
         let mut handles = vec![];
 
-        for possible_move in self.goban.get_possible_moves() {
+        for possible_move in self.goban.get_limited_moves(2) {
             let moves = Arc::clone(&moves);
             let mut initial_node = self.goban.clone();
 
             let handle = thread::spawn(move || {
                 initial_node.set(possible_move.row, possible_move.col, Cell::Computer);
 
-                let eval = Self::minimax(
+                let score = Self::minimax(
                     &initial_node,
-                    depth - 2,
+                    depth - 1,
                     isize::MIN,
                     isize::MAX,
-                    false
+                    false,
                 );
 
-                moves.lock().unwrap().insert(possible_move, eval);
+                moves.lock().unwrap().insert(possible_move, score);
             });
 
             handles.push(handle);
@@ -78,10 +108,14 @@ impl Gomoku {
         let moves = Arc::try_unwrap(moves).unwrap().into_inner().unwrap();
 
         if let Some(move_to_play) = Self::get_best_move(moves) {
-            match self.play(move_to_play, Player::Computer) {
+            let state= match self.play(move_to_play, Player::Computer) {
                 Ok(state) => state,
                 Err(_) => panic!("Invalid move found"),
-            }
+            };
+
+            println!("Final board eval: {}", Self::evaluate(&self.goban));
+
+            state
         } else {
             panic!("No move found");
         }
@@ -93,13 +127,11 @@ impl Gomoku {
             .map(|(k, _v)| k)
     }
 
-    fn get_child_nodes(node: &Goban, player: Player) -> Vec<Goban>
-    {
-        let mut child_nodes = Vec::new();
+    fn get_child_nodes(node: &Goban, player: Player) -> Vec<NodeScore> {
+        let mut child_nodes: BinaryHeap<NodeScore> = BinaryHeap::new();
 
-        for position in node.get_possible_moves() {
-            // skip this iteration if position closest non empty cell is greater than n
-            // might we use dilation of some sort ?
+        // limiting the BF by selecting close neighbours only for now
+        for position in node.get_limited_moves(1) {
             let mut child = node.clone();
 
             child.set(position.row, position.col, match player {
@@ -107,10 +139,22 @@ impl Gomoku {
                 Player::Human => Cell::Human
             });
 
-            child_nodes.push(child);
+            // TODO custom eval
+            let eval = 0;
+
+            child_nodes.push(NodeScore::new(child, eval));
         }
 
-        child_nodes
+        // child_nodes.into_iter_sorted().take(BRANCHING_FACTOR_THRESHOLD).collect()
+        child_nodes.into_iter_sorted().collect()
+    }
+
+    fn evaluate(node: &Goban) -> isize {
+        match node.evaluate() {
+            Eval::Won => isize::MAX,
+            Eval::Lost => isize::MIN,
+            Eval::Score(n) => n,
+        }
     }
 
     fn minimax(node: &Goban, depth: usize, mut alpha: isize, mut beta: isize, maximizing: bool) -> isize {
@@ -121,38 +165,35 @@ impl Gomoku {
             _ => (),
         }
 
-        let mut result = match maximizing {
-            true => isize::MIN,
-            false => isize::MAX,
-        };
+        let mut best;
 
-        for child in Self::get_child_nodes(node, match maximizing {
-            true => Player::Computer,
-            false => Player::Human
-        }) {
-            let eval = Self::minimax(&child, depth - 1, alpha, beta, !maximizing);
+        if maximizing {
+            best = isize::MIN;
 
-            result = match maximizing {
-                true => cmp::max(result, eval),
-                false => cmp::min(result, eval),
-            };
+            for child in Self::get_child_nodes(node, Player::Computer) {
+                best = max(best, Self::minimax(&child.node, depth - 1, alpha, beta, false));
 
-            let pruning = match maximizing {
-                true => result >= beta,
-                false => alpha >= result,
-            };
+                if best >= beta {
+                    break ;
+                }
 
-            if pruning {
-                return result;
+                alpha = max(alpha, best);
             }
+        } else {
+            best = isize::MAX;
 
-            match maximizing {
-                true => alpha = cmp::max(alpha, result),
-                false => beta = cmp::min(beta, result),
-            };
+            for child in Self::get_child_nodes(node, Player::Human) {
+                best = min(best, Self::minimax(&child.node, depth - 1, alpha, beta, true));
+
+                if best <= alpha {
+                    break ;
+                }
+
+                beta = min(beta, best);
+            }
         }
 
-        result
+        best
     }
 
     fn game_state(&self) -> GameState {
