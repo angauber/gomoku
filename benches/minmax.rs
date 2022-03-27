@@ -1,8 +1,8 @@
 #![feature(test)]
 extern crate test;
 
+use gomoku::goban::{Player, Position};
 use gomoku::gomoku::Gomoku;
-use gomoku::goban::{Position,Player};
 
 #[cfg(test)]
 mod tests {
@@ -13,11 +13,11 @@ mod tests {
     fn minmax(bencher: &mut Bencher) {
         let mut gomoku: Gomoku = Gomoku::default();
 
-        gomoku.play(Position { row: 3, col: 3}, Player::Human);
-        gomoku.play(Position { row: 4, col: 4}, Player::Human);
-        gomoku.play(Position { row: 5, col: 5}, Player::Human);
-        gomoku.play(Position { row: 7, col: 7}, Player::Human);
+        gomoku.play(Position { row: 3, col: 3 }, Player::Opponent);
+        gomoku.play(Position { row: 4, col: 4 }, Player::Opponent);
+        gomoku.play(Position { row: 5, col: 5 }, Player::Opponent);
+        gomoku.play(Position { row: 7, col: 7 }, Player::Opponent);
 
-        bencher.iter(|| gomoku.play_computer_move(2));
+        bencher.iter(|| gomoku.play_computer_move(3));
     }
 }

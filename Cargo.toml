@@ -6,6 +6,14 @@ edition = "2018"
 [features]
 unstable = []
 
+[[bin]]
+name = "gomoku"
+path = "src/main.rs"
+
+[[bin]]
+name = "profiling"
+path = "src/profiling.rs"
+
 [profile.release]
 opt-level = 3
 

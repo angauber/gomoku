@@ -1,9 +1,9 @@
+use gomoku::goban::{Player, Position};
+use gomoku::gomoku::{GameState, Gomoku};
 use std::io;
 use std::time::Instant;
-use gomoku::gomoku::{GameState, Gomoku};
-use gomoku::goban::{Position, Player};
 
-fn get_human_move(input: String) -> Result<Position, &'static str> {
+fn get_move(input: String) -> Result<Position, &'static str> {
     let tokens: Vec<&str> = input.trim().split(' ').collect();
 
     if tokens.len() != 2 {
@@ -26,10 +26,13 @@ fn get_human_move(input: String) -> Result<Position, &'static str> {
 fn display_win(gomoku: Gomoku, player: Player) {
     gomoku.print_board();
 
-    println!("{} Won !", match player {
-        Player::Human => "You",
-        Player::Computer => "Computer",
-    });
+    println!(
+        "{} Won !",
+        match player {
+            Player::Opponent => "You",
+            Player::Computer => "Computer",
+        }
+    );
 }
 
 fn main() {
@@ -41,11 +44,13 @@ fn main() {
         let mut input = String::new();
 
         println!("Input: row col");
-        io::stdin().read_line(&mut input).expect("Could not read from stdin");
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Could not read from stdin");
 
-        match get_human_move(input) {
+        match get_move(input) {
             Ok(position) => {
-                let result = gomoku.play(position, Player::Human);
+                let result = gomoku.play(position, Player::Opponent);
 
                 if let Err(message) = result {
                     println!("{}", message);
