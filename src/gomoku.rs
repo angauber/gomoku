@@ -3,7 +3,7 @@ use std::collections::{BinaryHeap, HashMap};
 use std::isize;
 
 use crate::evaluator::Eval;
-use crate::goban::{Cell, Goban, Player, Position, GOBAN_SIZE};
+use crate::goban::{Cell, Goban, GOBAN_SIZE, Player, Position};
 use crate::threat_evaluator::ThreatEvaluator;
 
 const BRANCHING_FACTOR_THRESHOLD: usize = 10;
@@ -130,7 +130,7 @@ impl Gomoku {
     fn get_child_nodes(&mut self, node: &Goban, player: Player) -> Vec<NodeScore> {
         let mut child_nodes: BinaryHeap<NodeScore> = BinaryHeap::new();
 
-        for position in node.get_possible_moves() {
+        for position in node.get_limited_moves(2) {
             let mut child = node.clone();
 
             child.set(
@@ -142,6 +142,9 @@ impl Gomoku {
                 },
             );
 
+            // We should use a custom evaluation function for this
+            // With this solution we will miss winning / losing nodes
+            // one idea: include only move that create threat or block some
             child.evaluate(&mut self.evaluator, player);
 
             let eval = match child.eval().unwrap() {

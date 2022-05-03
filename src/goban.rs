@@ -1,8 +1,9 @@
+use std::{fmt, isize};
 use std::cmp::{Eq, PartialEq};
 use std::hash::Hash;
-use std::{fmt, isize};
 
 use bitvec::prelude::*;
+use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use crate::evaluator::{Eval, Evaluator};
@@ -12,7 +13,7 @@ pub const GOBAN_TOTAL_SIZE: usize = GOBAN_SIZE * GOBAN_SIZE;
 pub const BIT_SIZE: usize = GOBAN_TOTAL_SIZE + GOBAN_SIZE;
 pub const WIN_MINIMUM_LINE_SIZE: usize = 5;
 
-pub type Bitboard = BitArr!(for BIT_SIZE, in Msb0, u8); // u32 ?? mybe more ?
+pub type Bitboard = BitArr!(for BIT_SIZE, in Msb0, u8);
 
 #[derive(Debug, Clone, Copy)]
 pub enum Player {
@@ -130,11 +131,35 @@ impl Goban {
         self.eval.clone()
     }
 
-    pub fn get_possible_moves(&self) -> Vec<Position> {
-        let mut positions: Vec<Position> = Vec::new();
-        let playable = !(self.opponent | self.computer);
+    fn dilate(bitboard: &Bitboard, axis: Direction) -> Bitboard {
+        let mut rhs = *bitboard;
 
-        for index in playable.iter_ones() {
+        match axis as isize {
+            n if n > 0 => rhs.shift_right(n as usize),
+            n if n < 0 => rhs.shift_left(-n as usize),
+            _ => {}
+        }
+
+        *bitboard | rhs
+    }
+
+    pub fn get_limited_moves(&self, steps: usize) -> Vec<Position>
+    {
+        let mut positions: Vec<Position> = Vec::new();
+        let mut played_set = self.opponent | self.computer;
+        let playable_set = !played_set;
+        let mut limited_set = played_set;
+
+        for _ in 0..steps {
+            for axis in Direction::iter() {
+                limited_set |= Self::dilate(&played_set, axis);
+            }
+            played_set = limited_set;
+        }
+
+        limited_set &= playable_set;
+
+        for index in limited_set.iter_ones() {
             let row = index / (GOBAN_SIZE + 1);
             let col = index - (row * (GOBAN_SIZE + 1));
 

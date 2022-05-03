@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use bitvec::prelude::*;
 
 use crate::evaluator::{Eval, Evaluator};
@@ -20,6 +21,21 @@ type PatternWithLength = (Pattern, Pattern, usize);
 
 pub struct ThreatEvaluator {
     threat_cache: [[Option<Option<Threat>>; 255]; 3],
+}
+
+impl PartialOrd for Threat {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(match self {
+            Self::Five => match other {
+                Self::Five => Ordering::Equal,
+                _ => Ordering::Less,
+            },
+            _ => match other {
+                Self::Five => Ordering::Greater,
+                _ => (*self as isize).cmp(&(*other as isize)),
+            }
+        })
+    }
 }
 
 impl Evaluator for ThreatEvaluator {
@@ -57,38 +73,73 @@ impl ThreatEvaluator {
 
     fn evaluate_axis(&mut self, player: &Bitboard, opponent: &Bitboard, axis: Direction) -> Eval {
         let mut score: isize = 0;
+        let mut strongest_continuous_threat: Option<(Threat, bool)> = None;
+        let mut no_threats = true;
 
-        'bits: for index in 0..BIT_SIZE as isize {
-            if let Some((player_pattern, opponent_pattern, mut length)) = self.extract_pattern(player, opponent, index, axis) {
-                while length >= 5 {
-                    if let Some(player_threat) = self.match_threat(
-                        &player_pattern[0..length],
-                        &opponent_pattern[0..length],
-                    ) {
-                        match player_threat {
-                            Threat::Five => return Eval::Won,
-                            _ => score += player_threat as isize,
+        for index in 0..BIT_SIZE+1 {
+            if let Some(
+                (player_full_pattern, opponent_full_pattern, max_length)
+            ) = self.extract_pattern(player, opponent, index as isize, axis) {
+                no_threats = true;
+
+                for (player_pattern, opponent_pattern, is_player) in [
+                    (player_full_pattern, opponent_full_pattern, true),
+                    (opponent_full_pattern, player_full_pattern, false)
+                ] {
+                    'patterns: for length in (5..max_length + 1).rev() {
+                        if let Some(threat) = self.match_threat(
+                            &player_pattern[0..length],
+                            &opponent_pattern[0..length],
+                            length,
+                        ) {
+                            if threat == Threat::Five {
+                                return match is_player {
+                                    true => Eval::Won,
+                                    false => Eval::Lost
+                                };
+                            }
+
+                            no_threats = false;
+
+                            strongest_continuous_threat = Some((
+                                Self::get_strongest_threat(
+                                    strongest_continuous_threat.map_or_else(
+                                        || None,
+                                        |st| Some(st.0),
+                                    ),
+                                    threat,
+                                ),
+                                is_player
+                            ));
+
+                            break 'patterns;
                         }
-
-                        continue 'bits;
-                    } else if let Some(opponent_threat) = self.match_threat(
-                        &opponent_pattern[0..length],
-                        &player_pattern[0..length],
-                    ) {
-                        match opponent_threat {
-                            Threat::Five => return Eval::Lost,
-                            _ => score -= opponent_threat as isize,
-                        }
-
-                        continue 'bits;
                     }
-
-                    length -= 1;
                 }
+            }
+
+            if no_threats || index == BIT_SIZE {
+                if let Some((strongest_threat, is_player)) = strongest_continuous_threat {
+                    score = match is_player {
+                        true => score + strongest_threat as isize,
+                        false => score - strongest_threat as isize,
+                    }
+                }
+                strongest_continuous_threat = None;
             }
         }
 
         Eval::Score(score)
+    }
+
+    fn get_strongest_threat(current: Option<Threat>, new: Threat) -> Threat {
+        match current {
+            None => new,
+            Some(old) => match old > new {
+                true => old,
+                false => new,
+            }
+        }
     }
 
     fn extract_pattern(
@@ -146,52 +197,65 @@ impl ThreatEvaluator {
         &mut self,
         player_slice: &PatternSlice,
         opponent_slice: &PatternSlice,
+        length: usize,
     ) -> Option<Threat> {
         if opponent_slice.any() {
             return None;
         }
 
-        let group: usize = player_slice.len() - 5;
+        let group: usize = length - 5;
         let index: usize = player_slice.as_raw_slice()[0] as usize;
 
         if let Some(cache) = self.threat_cache[group][index] {
             return cache;
         }
 
-        let cache = Self::compute_threat(player_slice);
+        let cache = Self::compute_threat(player_slice, length);
 
         self.threat_cache[group][index] = Some(cache);
 
         cache
     }
 
-    fn compute_threat(slice: &PatternSlice) -> Option<Threat> {
-        if slice == bits![1, 1, 1, 1, 1] {
-            return Some(Threat::Five);
-        }
-
-        let ones = slice.count_ones();
-
-        if ones == 4 {
-            if slice == bits![0, 1, 1, 1, 1, 0] {
-                return Some(Threat::StraightFour);
-            } else if slice.len() == 5 {
-                return Some(Threat::Four);
-            }
-        } else if ones == 3 {
-            if slice.eq(bits![0, 0, 1, 1, 1, 0, 0])
-                || slice.eq(bits![0, 1, 1, 1, 0, 0])
-                || slice.eq(bits![0, 0, 1, 1, 1, 0])
-            {
-                return Some(Threat::Three);
-            } else if slice.eq(bits![0, 1, 0, 1, 1, 0])
-                || slice.eq(bits![0, 1, 1, 0, 1, 0])
-            {
-                return Some(Threat::BrokenThree);
-            }
+    fn compute_threat_seven(slice: &PatternSlice) -> Option<Threat> {
+        if slice.eq(bits![0, 0, 1, 1, 1, 0, 0]) {
+            return Some(Threat::Three);
         }
 
         None
+    }
+
+    fn compute_threat_six(slice: &PatternSlice) -> Option<Threat> {
+        if slice.eq(bits![0, 1, 1, 1, 1, 0]) {
+            return Some(Threat::StraightFour);
+        }
+
+        if slice.eq(bits![0, 1, 1, 1, 0, 0]) || slice.eq(bits![0, 0, 1, 1, 1, 0]) {
+            return Some(Threat::Three);
+        }
+
+        if slice.eq(bits![0, 1, 0, 1, 1, 0]) || slice.eq(bits![0, 1, 1, 0, 1, 0]) {
+            return Some(Threat::BrokenThree);
+        }
+
+        None
+    }
+
+    fn compute_threat_five(slice: &PatternSlice) -> Option<Threat> {
+        match slice.count_ones() {
+            5 => Some(Threat::Five),
+            4 => Some(Threat::Four),
+            _ => None,
+        }
+    }
+
+    fn compute_threat(slice: &PatternSlice, length: usize) -> Option<Threat> {
+        match length {
+            7 => Self::compute_threat_seven(slice),
+            6 => Self::compute_threat_six(slice),
+            5 => Self::compute_threat_five(slice),
+            _ => panic!("Unknown threat length {}", length),
+        }
     }
 }
 
@@ -242,29 +306,33 @@ mod evaluator_tests {
 #[cfg(test)]
 mod pattern_tests {
     use bitvec::prelude::*;
+    use crate::evaluator::{Eval, Evaluator};
 
     use crate::threat_evaluator::{Threat, ThreatEvaluator};
 
     #[test]
-    fn it_correctly_detects_straight_fours() {
+    fn it_correctly_detects_fives() {
         let mut evaluator = ThreatEvaluator::new();
 
-        let mut computer = bitarr![Msb0, u8; 0];
-        let opponent = bitarr![Msb0, u8; 0];
+        let mut computer = bitarr![Msb0, u8; 0; 380];
+        let opponent = bitarr![Msb0, u8; 0; 380];
 
+        computer.set(0, true);
         computer.set(1, true);
         computer.set(2, true);
         computer.set(3, true);
         computer.set(4, true);
 
         assert_eq!(
-            evaluator.match_threat(&computer[0..6], &opponent[0..6]),
-            Some(Threat::StraightFour)
+            evaluator.match_threat(&computer[0..5], &opponent[0..5], 5),
+            Some(Threat::Five)
         );
+
+        assert_eq!(evaluator.evaluate(&computer, &opponent), Eval::Won);
     }
 
     #[test]
-    fn it_correctly_detects_fours() {
+    fn it_correctly_detects_straight_fours() {
         let mut evaluator = ThreatEvaluator::new();
 
         let mut computer = bitarr![Msb0, u8; 0; 380];
@@ -276,9 +344,31 @@ mod pattern_tests {
         computer.set(4, true);
 
         assert_eq!(
-            evaluator.match_threat(&computer[0..5], &opponent[0..5]),
+            evaluator.match_threat(&computer[0..6], &opponent[0..6], 6),
+            Some(Threat::StraightFour)
+        );
+
+        assert_eq!(evaluator.evaluate(&computer, &opponent), Eval::Score(Threat::StraightFour as isize));
+    }
+
+    #[test]
+    fn it_correctly_detects_fours() {
+        let mut evaluator = ThreatEvaluator::new();
+
+        let mut computer = bitarr![Msb0, u8; 0; 380];
+        let opponent = bitarr![Msb0, u8; 0; 380];
+
+        computer.set(0, true);
+        computer.set(1, true);
+        computer.set(2, true);
+        computer.set(3, true);
+
+        assert_eq!(
+            evaluator.match_threat(&computer[0..5], &opponent[0..5], 5),
             Some(Threat::Four)
         );
+
+        assert_eq!(evaluator.evaluate(&computer, &opponent), Eval::Score(Threat::Four as isize));
     }
 
     #[test]
@@ -293,7 +383,7 @@ mod pattern_tests {
         computer.set(4, true);
 
         assert_eq!(
-            evaluator.match_threat(&computer[0..7], &opponent[0..7]),
+            evaluator.match_threat(&computer[0..7], &opponent[0..7], 7),
             Some(Threat::Three)
         );
 
@@ -304,9 +394,11 @@ mod pattern_tests {
         computer.set(3, true);
 
         assert_eq!(
-            evaluator.match_threat(&computer[0..6], &opponent[0..6]),
+            evaluator.match_threat(&computer[0..6], &opponent[0..6], 6),
             Some(Threat::Three)
         );
+
+        assert_eq!(evaluator.evaluate(&computer, &opponent), Eval::Score(Threat::Three as isize));
     }
 
     #[test]
@@ -321,8 +413,10 @@ mod pattern_tests {
         computer.set(4, true);
 
         assert_eq!(
-            evaluator.match_threat(&computer[0..6], &opponent[0..6]),
+            evaluator.match_threat(&computer[0..6], &opponent[0..6], 6),
             Some(Threat::BrokenThree)
         );
+
+        assert_eq!(evaluator.evaluate(&computer, &opponent), Eval::Score(Threat::BrokenThree as isize));
     }
 }
