@@ -47,15 +47,55 @@ pub enum Direction {
     NorthWest = -((GOBAN_SIZE + 1) as isize) - 1,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash)]
 pub struct Position {
     pub row: usize,
     pub col: usize,
 }
 
+impl fmt::Debug for Position {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let (col, row) = self.to_coordinates();
+
+        write!(f, "{}{}", col, row)
+    }
+}
+
 impl Position {
     pub fn new(row: usize, col: usize) -> Position {
         Position { row, col }
+    }
+
+    pub fn from_coordinates(position: &str) -> Result<Position, String> {
+        if position.len() < 2 {
+            return Err(format!("Invalid position `{}`", position));
+        }
+
+        let (col_str, row_str) = position.split_at(1);
+
+        let ascii_offset: isize = 97;
+        let col: isize = col_str.chars().next().unwrap().to_lowercase().next().unwrap() as isize - ascii_offset;
+        let row: isize = 19 - row_str.parse::<isize>().unwrap_or(-1);
+
+        if !(0..19).contains(&col) {
+            return Err(format!("invalid col value `{}`", col_str));
+        }
+
+        if !(0..19).contains(&row) {
+            return Err(format!("invalid row value `{}`", row_str));
+        }
+
+
+        Ok(Position::new(row as usize, col as usize))
+    }
+
+    pub fn to_coordinates(&self) -> (char, usize) {
+        let ascii_offset: usize = 65;
+
+        let col: char = (self.col + ascii_offset) as u8 as char;
+        let row: usize = 19 - self.row;
+
+        (col, row)
     }
 }
 
@@ -79,10 +119,10 @@ impl fmt::Debug for Goban {
                     }
                 )?;
             }
-            writeln!(f, "{}", row)?;
+            writeln!(f, "{}", 19 - row)?;
         }
 
-        writeln!(f, "0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8")
+        writeln!(f, "A B C D E F G H I J K L M N O P Q R S")
     }
 }
 

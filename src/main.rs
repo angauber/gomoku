@@ -3,26 +3,6 @@ use gomoku::gomoku::{GameState, Gomoku};
 use std::io;
 use std::time::Instant;
 
-fn get_move(input: String) -> Result<Position, &'static str> {
-    let tokens: Vec<&str> = input.trim().split(' ').collect();
-
-    if tokens.len() != 2 {
-        return Err("Invalid input");
-    }
-
-    let row = tokens[0].parse();
-    let col = tokens[1].parse();
-
-    if row.is_err() || col.is_err() {
-        return Err("Invalid input");
-    }
-
-    Ok(Position {
-        row: row.unwrap(),
-        col: col.unwrap(),
-    })
-}
-
 fn display_win(gomoku: Gomoku, player: Player) {
     gomoku.print_board();
 
@@ -43,12 +23,12 @@ fn main() {
     loop {
         let mut input = String::new();
 
-        println!("Input: row col");
+        println!("Input: col row (A19)");
         io::stdin()
             .read_line(&mut input)
             .expect("Could not read from stdin");
 
-        match get_move(input) {
+        match Position::from_coordinates(input.trim()) {
             Ok(position) => {
                 let result = gomoku.play(position, Player::Opponent);
 
