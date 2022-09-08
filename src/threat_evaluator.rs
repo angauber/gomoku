@@ -40,7 +40,15 @@ impl PartialOrd for Threat {
 
 impl Evaluator for ThreatEvaluator {
     fn evaluate(&mut self, player: &Bitboard, opponent: &Bitboard) -> Eval {
-        self.evaluate_player(player, opponent)
+        match self.evaluate_player(player, opponent) {
+            Eval::Score(player_score) => match self.evaluate_player(opponent, player) {
+                Eval::Won => Eval::Lost,
+                Eval::Lost => Eval::Won,
+                Eval::Score(opponent_score) => Eval::Score(player_score - opponent_score),
+            },
+            Eval::Won => Eval::Won,
+            Eval::Lost => Eval::Lost,
+        }
     }
 }
 
@@ -261,45 +269,48 @@ impl ThreatEvaluator {
 
 #[cfg(test)]
 mod evaluator_tests {
+    use std::rc::Rc;
     use crate::evaluator::{Eval};
-    use crate::goban::{Cell, Goban, Player, WIN_MINIMUM_LINE_SIZE};
+    use crate::goban::{Goban, Move, Player, Position, Stone, WIN_MINIMUM_LINE_SIZE};
     use crate::threat_evaluator::ThreatEvaluator;
+    use crate::zobrist_hashing::ZobristHasher;
 
     #[test]
     fn it_correctly_detects_win() {
         let mut evaluator = ThreatEvaluator::new();
+        let hasher = Rc::new(ZobristHasher::initialize());
 
-        let mut board = Goban::new();
-
-        for i in 0..WIN_MINIMUM_LINE_SIZE {
-            board.set(0, i, Cell::Computer);
-        }
-
-        board.evaluate(&mut evaluator, Player::Computer);
-
-        assert_eq!(board.eval(), Some(Eval::Won));
-
-        board = Goban::new();
+        let mut board = Goban::new(Rc::clone(&hasher));
 
         for i in 0..WIN_MINIMUM_LINE_SIZE {
-            board.set(i, 0, Cell::Opponent);
+            board.apply_move(Move::new(Stone::White, Position::new(0, i)));
         }
 
-        board.evaluate(&mut evaluator, Player::Computer);
+        let eval = board.evaluate(&mut evaluator, Player::Computer);
 
-        assert_eq!(board.eval(), Some(Eval::Lost));
+        assert_eq!(eval, Eval::Won);
 
-        board = Goban::new();
+        board = Goban::new(Rc::clone(&hasher));
 
-        board.set(3, 3, Cell::Opponent);
-        board.set(4, 4, Cell::Opponent);
-        board.set(5, 5, Cell::Opponent);
-        board.set(6, 6, Cell::Opponent);
-        board.set(7, 7, Cell::Opponent);
+        for i in 0..WIN_MINIMUM_LINE_SIZE {
+            board.apply_move(Move::new(Stone::Black, Position::new(i, 0)));
+        }
 
-        board.evaluate(&mut evaluator, Player::Computer);
+        let eval = board.evaluate(&mut evaluator, Player::Computer);
 
-        assert_eq!(board.eval(), Some(Eval::Lost));
+        assert_eq!(eval, Eval::Lost);
+
+        board = Goban::new(Rc::clone(&hasher));
+
+        board.apply_move(Move::new(Stone::Black, Position::new(3, 3)));
+        board.apply_move(Move::new(Stone::Black, Position::new(4, 4)));
+        board.apply_move(Move::new(Stone::Black, Position::new(5, 5)));
+        board.apply_move(Move::new(Stone::Black, Position::new(6, 6)));
+        board.apply_move(Move::new(Stone::Black, Position::new(7, 7)));
+
+        let eval = board.evaluate(&mut evaluator, Player::Computer);
+
+        assert_eq!(eval, Eval::Lost);
     }
 }
 

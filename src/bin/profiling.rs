@@ -1,3 +1,4 @@
+use std::time::Instant;
 use gomoku::goban::{Player, Position};
 use gomoku::gomoku::{Gomoku};
 
@@ -20,7 +21,11 @@ fn main() {
 
     gomoku.print_board();
 
+    let t0 = Instant::now();
+
     gomoku.play_computer_move(4);
+
+    println!("Took: {} ms", t0.elapsed().as_millis());
 
     gomoku.print_board();
 }

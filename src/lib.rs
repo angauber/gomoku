@@ -4,3 +4,5 @@ mod evaluator;
 pub mod goban;
 pub mod gomoku;
 mod threat_evaluator;
+pub mod zobrist_hashing;
+mod transposition_table;

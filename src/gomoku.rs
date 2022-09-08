@@ -1,10 +1,15 @@
 use std::cmp::{max, min, Ordering};
 use std::collections::{BinaryHeap, HashMap};
+use std::collections::btree_map::Entry;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::isize;
+use std::rc::Rc;
 
 use crate::evaluator::Eval;
-use crate::goban::{Cell, Goban, GOBAN_SIZE, Player, Position};
+use crate::goban::{Goban, GOBAN_SIZE, Move, Player, Position, Stone};
 use crate::threat_evaluator::ThreatEvaluator;
+use crate::transposition_table::TranspositionTable;
+use crate::zobrist_hashing::ZobristHasher;
 
 const BRANCHING_FACTOR_THRESHOLD: usize = 10;
 
@@ -16,6 +21,12 @@ pub enum GameState {
 pub struct Gomoku {
     goban: Goban,
     evaluator: ThreatEvaluator,
+    transposition_table: TranspositionTable,
+    zobrist_hasher: Rc<ZobristHasher>,
+    visited_nodes: usize,
+    evaluated_nodes: usize,
+    evaluated_nodes_hit: usize,
+    evaluated_nodes_miss: usize,
 }
 
 #[derive(Eq, PartialEq)]
@@ -49,9 +60,17 @@ impl NodeScore {
 
 impl Default for Gomoku {
     fn default() -> Self {
+        let hasher = Rc::new(ZobristHasher::initialize());
+
         Self {
-            goban: Goban::new(),
+            goban: Goban::new(Rc::clone(&hasher)),
             evaluator: ThreatEvaluator::new(),
+            transposition_table: TranspositionTable::new(),
+            zobrist_hasher: hasher,
+            visited_nodes: 0,
+            evaluated_nodes: 0,
+            evaluated_nodes_hit: 0,
+            evaluated_nodes_miss: 0,
         }
     }
 }
@@ -64,19 +83,17 @@ impl Gomoku {
     pub fn play(&mut self, position: Position, player: Player) -> Result<GameState, &str> {
         if position.row >= GOBAN_SIZE
             || position.col >= GOBAN_SIZE
-            || self.goban.get(position.row, position.col) != Cell::Empty
+            || self.goban.get(position.row, position.col) != None
         {
             return Err("Invalid move");
         }
 
-        self.goban.set(
-            position.row,
-            position.col,
-            match player {
-                Player::Opponent => Cell::Opponent,
-                Player::Computer => Cell::Computer,
-            },
-        );
+        let stone = match player {
+            Player::Opponent => Stone::Black,
+            Player::Computer => Stone::White,
+        };
+
+        self.goban.apply_move(Move::new(stone, position));
 
         Ok(self.game_state())
     }
@@ -90,13 +107,16 @@ impl Gomoku {
             panic!("depth search cannot be odd")
         }
 
-        self.goban.evaluate(&mut self.evaluator, Player::Opponent);
-        println!("player score: {:?}", self.goban.eval());
+        let computer_eval = self.eval_current(Player::Computer);
 
-        self.goban.evaluate(&mut self.evaluator, Player::Computer);
-        println!("computer score: {:?}", self.goban.eval());
+        println!("computer score: {:?}", computer_eval);
 
         let mut moves = HashMap::new();
+
+        self.visited_nodes = 0;
+        self.evaluated_nodes = 0;
+        self.evaluated_nodes_hit = 0;
+        self.evaluated_nodes_miss = 0;
 
         for child in self.get_child_nodes(&self.goban.clone(), Player::Computer) {
             let score = self.minimax(&child.node, depth - 1, isize::MIN, isize::MAX, false);
@@ -104,7 +124,7 @@ impl Gomoku {
             moves.insert(child.position, score);
         }
 
-        println!("{:?}", moves);
+        // println!("{:?}", moves);
 
         if let Some(move_to_play) = Self::get_best_move(moves) {
             println!("move to play: {:?}", move_to_play);
@@ -113,6 +133,9 @@ impl Gomoku {
                 Ok(state) => state,
                 Err(_) => panic!("Invalid move found"),
             };
+
+            println!("visited {} nodes", self.visited_nodes);
+            println!("evaluated {} nodes (cache hit {}, cache miss: {})", self.evaluated_nodes, self.evaluated_nodes_hit, self.evaluated_nodes_miss);
 
             state
         } else {
@@ -133,27 +156,25 @@ impl Gomoku {
         for position in node.get_limited_moves(2) {
             let mut child = node.clone();
 
-            child.set(
-                position.row,
-                position.col,
-                match player {
-                    Player::Computer => Cell::Computer,
-                    Player::Opponent => Cell::Opponent,
-                },
-            );
+            let stone = match player {
+                Player::Computer => Stone::White,
+                Player::Opponent => Stone::Black,
+            };
+
+            child.apply_move(Move::new(stone, position.clone()));
 
             // We should use a custom evaluation function for this
             // With this solution we will miss winning / losing nodes
             // one idea: include only move that create threat or block some
-            child.evaluate(&mut self.evaluator, player);
+            let eval = self.eval(&mut child, player);
 
-            let eval = match child.eval().unwrap() {
+            let score_eval = match eval {
                 Eval::Won => isize::MAX,
                 Eval::Lost => isize::MIN,
                 Eval::Score(n) => n,
             };
 
-            child_nodes.push(NodeScore::new(child, position, eval));
+            child_nodes.push(NodeScore::new(child, position, score_eval));
         }
 
         child_nodes
@@ -170,10 +191,17 @@ impl Gomoku {
         mut beta: isize,
         maximizing: bool,
     ) -> isize {
-        match node.eval().unwrap() {
-            Eval::Won => return if maximizing { isize::MIN } else { isize::MAX },
-            Eval::Lost => return if maximizing { isize::MAX } else { isize::MIN },
-            Eval::Score(n) if depth == 0 => return n as isize * if maximizing { -1 } else { 1 },
+        let side = match maximizing {
+            true => Player::Computer,
+            false => Player::Opponent,
+        };
+
+        self.visited_nodes += 1;
+
+        match self.eval(&node, side) {
+            Eval::Won => return if maximizing { isize::MAX } else { isize::MIN },
+            Eval::Lost => return if maximizing { isize::MIN } else { isize::MAX },
+            Eval::Score(n) if depth == 0 => return n as isize * if maximizing { 1 } else { -1 },
             _ => {}
         };
 
@@ -215,12 +243,46 @@ impl Gomoku {
     }
 
     fn game_state(&mut self) -> GameState {
-        self.goban.evaluate(&mut self.evaluator, Player::Computer);
+        let eval = self.eval_current(Player::Computer);
 
-        match self.goban.eval().unwrap() {
+        match eval {
             Eval::Won => GameState::Won(Player::Computer),
             Eval::Lost => GameState::Won(Player::Opponent),
             Eval::Score(_) => GameState::InProgress
         }
+    }
+
+    fn eval(&mut self, goban: &Goban, player: Player) -> Eval
+    {
+        // self.transposition_table
+        //     .entry((goban.get_hash(), player))
+        //     .or_insert_with(|| goban.evaluate(&mut self.evaluator, player))
+        //     .to_owned()
+
+        self.evaluated_nodes += 1;
+
+        let key = (goban.get_hash(), player);
+        let entry = self.transposition_table.get(&key);
+
+        match entry {
+            Some(eval) => {
+                self.evaluated_nodes_hit += 1;
+                eval.to_owned()
+            },
+            None => {
+                self.evaluated_nodes_miss += 1;
+
+                let eval = goban.evaluate(&mut self.evaluator, player);
+
+                self.transposition_table.insert(key, eval.clone());
+
+                eval
+            }
+        }
+    }
+
+    fn eval_current(&mut self, player: Player) -> Eval
+    {
+        self.eval(&self.goban.clone(), player)
     }
 }

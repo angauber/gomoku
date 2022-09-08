@@ -8,11 +8,11 @@ unstable = []
 
 [[bin]]
 name = "gomoku"
-path = "src/main.rs"
+path = "src/bin/main.rs"
 
 [[bin]]
 name = "profiling"
-path = "src/profiling.rs"
+path = "src/bin/profiling.rs"
 
 [[bin]]
 name = "dep_tree"
@@ -26,3 +26,6 @@ opt-level = 3
 bitvec = "0.22.3"
 strum = "0.22"
 strum_macros = "0.22"
+rand = "0.8.5"
+clap = { version = "3.2.20", features = ["derive"]}
+
