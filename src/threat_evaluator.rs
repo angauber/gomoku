@@ -40,15 +40,7 @@ impl PartialOrd for Threat {
 
 impl Evaluator for ThreatEvaluator {
     fn evaluate(&mut self, player: &Bitboard, opponent: &Bitboard) -> Eval {
-        match self.evaluate_player(player, opponent) {
-            Eval::Score(player_score) => match self.evaluate_player(opponent, player) {
-                Eval::Won => Eval::Lost,
-                Eval::Lost => Eval::Won,
-                Eval::Score(opponent_score) => Eval::Score(player_score - opponent_score),
-            },
-            Eval::Won => Eval::Won,
-            Eval::Lost => Eval::Lost,
-        }
+        self.evaluate_player(player, opponent)
     }
 }
 

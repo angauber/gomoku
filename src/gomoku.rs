@@ -1,7 +1,5 @@
 use std::cmp::{max, min, Ordering};
 use std::collections::{BinaryHeap, HashMap};
-use std::collections::btree_map::Entry;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::isize;
 use std::rc::Rc;
 
@@ -22,7 +20,6 @@ pub struct Gomoku {
     goban: Goban,
     evaluator: ThreatEvaluator,
     transposition_table: TranspositionTable,
-    zobrist_hasher: Rc<ZobristHasher>,
     visited_nodes: usize,
     evaluated_nodes: usize,
     evaluated_nodes_hit: usize,
@@ -63,10 +60,9 @@ impl Default for Gomoku {
         let hasher = Rc::new(ZobristHasher::initialize());
 
         Self {
-            goban: Goban::new(Rc::clone(&hasher)),
+            goban: Goban::new(hasher),
             evaluator: ThreatEvaluator::new(),
             transposition_table: TranspositionTable::new(),
-            zobrist_hasher: hasher,
             visited_nodes: 0,
             evaluated_nodes: 0,
             evaluated_nodes_hit: 0,
@@ -166,7 +162,7 @@ impl Gomoku {
             // We should use a custom evaluation function for this
             // With this solution we will miss winning / losing nodes
             // one idea: include only move that create threat or block some
-            let eval = self.eval(&mut child, player);
+            let eval = self.eval(&child, player);
 
             let score_eval = match eval {
                 Eval::Won => isize::MAX,
@@ -198,7 +194,7 @@ impl Gomoku {
 
         self.visited_nodes += 1;
 
-        match self.eval(&node, side) {
+        match self.eval(node, side) {
             Eval::Won => return if maximizing { isize::MAX } else { isize::MIN },
             Eval::Lost => return if maximizing { isize::MIN } else { isize::MAX },
             Eval::Score(n) if depth == 0 => return n as isize * if maximizing { 1 } else { -1 },
